@@ -1,6 +1,6 @@
 # gorm history [![Go Report Card](https://goreportcard.com/badge/github.com/vcraescu/gorm-history)](https://goreportcard.com/report/github.com/vcraescu/gorm-history) [![Build Status](https://travis-ci.com/vcraescu/gorm-history.svg?branch=master)](https://travis-ci.com/vcraescu/gorm-history) [![Coverage Status](https://coveralls.io/repos/github/vcraescu/gorm-history/badge.svg?branch=master)](https://coveralls.io/github/vcraescu/gorm-history?branch=master) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-History is used to keep a history record of your GORM models.
-Each model must be associated with an history model which is a copy of the modified record.
+You can use the plugin to keep a history of your GORM models changes. Basically it keeps a ledger of your model state.
+Each model must be associated with a history model which will be a copy of the modified record.
 
 ## Install
 ```
@@ -8,55 +8,79 @@ go get github.com/vcraescu/gorm-history
 ```
 
 ## Usage
-1. Register the plugin using `history.Register(db)`:
 
-```go
-plugin, err := Register(db) // db is a *gorm.DB
-if err != nil {
-    panic(err)
-}
-```
+1. Register the plugin using `db.Use(history.New())`:
 
-2. Define your model and history model:
 ```go
 type Person struct {
-	gorm.Model
-	FirstName string
-	LastName  string
-	Address   *string
+    gorm.Model
+
+    FirstName string
+    LastName  string
 }
 
 type PersonHistory struct {
-	gorm.Model
-	history.Entry
+    gorm.Model
+    Entry
+}
 
-	FirstName string
-	LastName  string
-	Address   *string
+func main() {
+    db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+    if err != nil {
+        panic(err)
+    }
+
+    db = db.Session(&gorm.Session{})
+
+    err = db.AutoMigrate(Person{}, PersonHistory{})
+    if err != nil {
+        panic(err)
+    }
+
+    plugin := New()
+    if err := db.Use(plugin); err != nil {
+        return
+    }
+
+    db = SetUser(db, history.User{
+        ID:    123,
+        Email: "john@doe.com",
+    })
+    db = SetSource(db, history.Source{
+        ID:   "1c059a03-3b14-4017-ae33-5337860ec35f",
+        Type: "ampq",
+    })
+
+    p := Person{
+        FirstName: "John",
+        LastName:  "Doe",
+    }
+    if err := db.Save(&p).Error; err != nil {
+        panic(err)
+    }
 }
 ```
 
-3. Your model must implement `history.Recordable` interface:
+2. Your model must implement `history.Recordable` interface:
 ```go
 func (Person) CreateHistory() interface{} {
 	return PersonHistory{}
 }
 ```
 
-4. Changes after calling Create, Save, Update will be tracked.
+3. Changes after calling Create, Save and Update will be recorded as long as you pass in the original object. 
 
-
-*Note*: By default, the plugin will use time based versioning function for your history record which might not be 100%
-accurate in some cases but it is faster because it doesn't require to query the db history table at all.
+```go
+if err := db.Model(&p).Update("first_name", "Jane").Error; err != nil {
+    panic(err)
+}
+```
 
 ## Configuration
 
 ### Versioning 
 
-* `history.TimedVersionFunc` - It returns the nanonseconds value when the create/update happens;
-* `history.IncrementedVersionFunc` - It returns the maximum + 1 of current version column. If you use this versioning 
-method than you must tag your history model fields (or embed `history.Entry` struct) like this instead of 
-implementing the `history.History` interface:
+By default, the plugin generates a new ULID for each history record. You can implement your own versioning function.
 
 ```go
 type PersonHistory struct {
@@ -77,8 +101,7 @@ type PersonHistory struct {
 
 You can change the versioning function when you register the plugin:
 ```go
-plugin, err := Register(db, history.WithVersionFunc(history.IncrementedVersionFunc)) // db is a *gorm.DB
-if err != nil {
+if err := db.Use(history.New(history.WithVersionFunc(MyVersionFunc))); err != nil {
     panic(err)
 }
 ```
@@ -87,7 +110,7 @@ if err != nil {
 
 * `history.DefaultCopyFunc` - copies all the values of the recordable model to history model.
 
-You can change the copy function when you register the plugin if you defined your own function:
+You can change the copy function when you register the plugin if you defined your own copying function:
 
 ```go
 func myCopyFunc(r Recordable, history interface{}) error {
@@ -95,9 +118,7 @@ func myCopyFunc(r Recordable, history interface{}) error {
 }
 
 //...
-
-plugin, err := Register(db, history.WithCopyFunc(myCopyFunc)) // db is a *gorm.DB
-if err != nil {
+if err := db.Use(history.New(history.WithCopyFunc(myCopyFunc))); err != nil {
     panic(err)
 }
 ```
