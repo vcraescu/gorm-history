@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/oklog/ulid/v2"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"io"
 	"math/rand"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jinzhu/copier"
 )
@@ -206,7 +207,9 @@ func (p *Plugin) saveHistory(db *gorm.DB, hs ...History) error {
 		return nil
 	}
 
-	db = db.Session(&gorm.Session{})
+	db = db.Session(&gorm.Session{
+		NewDB: true,
+	})
 	for _, h := range hs {
 		if err := db.Omit(clause.Associations).Create(h).Error; err != nil {
 			return err
